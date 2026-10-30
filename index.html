@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Art Proofing Portal</title>
+  <!-- Load Tailwind CSS for styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-900 font-sans min-h-screen p-4 md:p-8">
+  
+  <div id="app" class="max-w-4xl mx-auto">
+    <!-- The JavaScript below will inject either the Admin Dashboard or Customer View here -->
+  </div>
+
+  <!-- Load Firebase Modular SDKs as an ES module -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // 1. REPLACE WITH YOUR FIREBASE CONFIG
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // 2. Routing logic: Check if the URL has a '?id=...' parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const proofId = urlParams.get('id');
+    const appDiv = document.getElementById('app');
+
+    if (proofId) {
+      renderCustomerView(proofId);
+    } else {
+      renderAdminView();
+    }
+
+    // --- CUSTOMER VIEW ---
+    async function renderCustomerView(id) {
+       appDiv.innerHTML = `<p class="text-xl font-bold animate-pulse">Loading your proof...</p>`;
+       try {
+         const docRef = doc(db, "proofs", id);
+         const docSnap = await getDoc(docRef);
+         
+         if (docSnap.exists()) {
+           const data = docSnap.data();
+           
+           let statusColor = "text-yellow-600";
+           if (data.status === "Approved") statusColor = "text-green-600";
+           if (data.status === "Denied") statusColor = "text-red-600";
+
+           appDiv.innerHTML = `
+             <div class="bg-white p-6 md:p-10 rounded-xl shadow-lg border border-gray-200">
+               <h1 class="text-3xl font-black uppercase tracking-tight mb-2">Review Your Design</h1>
+               <p class="mb-6 text-gray-500">Client: <span class="font-bold text-gray-900">${data.customerName}</span></p>
+               
+               <img src="${data.imageUrl}" alt="Art Proof" class="w-full max-w-2xl border-4 border-gray-100 rounded shadow-sm mb-6">
+               
+               <div class="bg-gray-50 p-4 rounded border mb-6">
+                 <p class="font-bold text-sm uppercase text-gray-500">Current Status</p>
+                 <p class="text-2xl font-black uppercase ${statusColor}">${data.status}</p>
+               </div>
+
+               ${data.status === 'Pending' ? `
+                 <div class="flex flex-wrap gap-4">
+                   <button id="approveBtn" class="bg-green-600 text-white px-8 py-4 rounded font-bold uppercase tracking-wide hover:bg-green-700 transition-colors">Approve Design</button>
+                   <button id="denyBtn" class="bg-red-600 text-white px-8 py-4 rounded font-bold uppercase tracking-wide hover:bg-red-700 transition-colors">Request Changes</button>
+                 </div>
+               ` : `
+                 <p class="text-gray-600 italic">This proof has been closed.</p>
+               `}
+             </div>
+           `;
+
+           if (data.status === 'Pending') {
+             document.getElementById('approveBtn').addEventListener('click', () => updateStatus(id, 'Approved'));
+             document.getElementById('denyBtn').addEventListener('click', () => updateStatus(id, 'Denied'));
+           }
+         } else {
+           appDiv.innerHTML = `<h1 class="text-2xl font-bold text-red-600">Proof not found. It may have been deleted.</h1>`;
+         }
+       } catch(e) {
+         console.error(e);
+         appDiv.innerHTML = `<p class="text-red-600">Error loading database.</p>`;
+       }
+    }
+
+    async function updateStatus(id, newStatus) {
+       await updateDoc(doc(db, "proofs", id), { status: newStatus });
+       renderCustomerView(id); // Reload the UI to hide buttons
+    }
+
+    // --- ADMIN VIEW ---
+    function renderAdminView() {
+      appDiv.innerHTML = `
+        <h1 class="text-4xl font-black uppercase tracking-tighter mb-8 border-b-4 border-black pb-4 inline-block">Proofing Dashboard</h1>
+        
+        <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
+          <h2 class="text-xl font-bold uppercase tracking-wide mb-4 text-gray-700">Generate New Link</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <input id="custName" type="text" placeholder="Customer Name" class="border-2 border-gray-200 p-3 rounded w-full outline-none focus:border-black transition-colors">
+            <input id="imgUrl" type="url" placeholder="Direct Image URL (e.g., https://...)" class="border-2 border-gray-200 p-3 rounded w-full outline-none focus:border-black transition-colors">
+          </div>
+          <button id="createBtn" class="bg-black text-white px-6 py-3 rounded font-bold uppercase tracking-wide hover:bg-gray-800 transition-colors w-full md:w-auto">Create Proof</button>
+        </div>
+
+        <h2 class="text-2xl font-bold uppercase tracking-tight mb-4">Recent Proofs</h2>
+        <div id="proofList" class="flex flex-col gap-4"></div>
+      `;
+
+      // Create new proof
+      document.getElementById('createBtn').addEventListener('click', async () => {
+         const name = document.getElementById('custName').value;
+         const url = document.getElementById('imgUrl').value;
+         if(name && url) {
+           await addDoc(collection(db, "proofs"), {
+             customerName: name,
+             imageUrl: url,
+             status: 'Pending',
+             createdAt: new Date()
+           });
+           document.getElementById('custName').value = '';
+           document.getElementById('imgUrl').value = '';
+         } else {
+           alert("Please enter both a name and an image URL.");
+         }
+      });
+
+      // Listen for database changes and render list
+      onSnapshot(collection(db, "proofs"), (snapshot) => {
+        const listDiv = document.getElementById('proofList');
+        listDiv.innerHTML = '';
+        
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          // Generate the unique link for the customer
+          const clientLink = window.location.href.split('?')[0] + '?id=' + docSnap.id;
+          
+          let borderClass = "border-yellow-400";
+          if(data.status === 'Approved') borderClass = "border-green-500";
+          if(data.status === 'Denied') borderClass = "border-red-500";
+
+          listDiv.innerHTML += `
+            <div class="bg-white p-5 rounded-lg shadow-sm border-l-8 ${borderClass} flex justify-between items-center">
+              <div>
+                <p class="font-black text-xl uppercase tracking-tight">${data.customerName}</p>
+                <p class="text-sm font-bold text-gray-500 uppercase mb-2">Status: ${data.status}</p>
+                <div class="flex gap-2">
+                  <a href="${clientLink}" target="_blank" class="text-blue-600 font-bold hover:underline text-sm uppercase">Open Portal</a>
+                  <span class="text-gray-300">|</span>
+                  <button onclick="navigator.clipboard.writeText('${clientLink}'); alert('Link Copied!')" class="text-gray-600 hover:text-black font-bold text-sm uppercase cursor-pointer">Copy Link</button>
+                </div>
+              </div>
+              <img src="${data.imageUrl}" class="h-20 w-20 object-cover rounded shadow-sm border border-gray-200">
+            </div>
+          `;
+        });
+      });
+    }
+  </script>
+</body>
+</html>
